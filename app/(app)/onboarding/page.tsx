@@ -8,47 +8,65 @@ const LEVELS = [
   {
     level: 'A0',
     title: 'Sıfırdan Başlıyorum',
-    desc: 'İngilizce hiç bilmiyorum veya çok azını biliyorum',
-    examples: 'hello, yes, no, water',
-    color: 'from-slate-400 to-slate-500',
+    desc: 'İngilizce hiç bilmiyorum — en temel kelimelerle başla',
+    examples: 'hello, yes, no, water, one, two',
     bg: 'bg-slate-50 border-slate-200',
     active: 'bg-slate-700 border-slate-700',
+    badge: '~150 kelime',
   },
   {
     level: 'A1',
-    title: 'Temel Seviye',
-    desc: 'Günlük basit cümleleri anlayabilirim',
-    examples: 'family, school, food, colors',
-    color: 'from-green-400 to-emerald-500',
+    title: 'Başlangıç',
+    desc: 'Temel günlük kelimeleri ve kısa cümleleri biliyorum',
+    examples: 'family, school, food, color, time',
     bg: 'bg-emerald-50 border-emerald-200',
     active: 'bg-emerald-600 border-emerald-600',
+    badge: '~500 kelime hedefi',
   },
   {
     level: 'A2',
-    title: 'Başlangıç Üstü',
-    desc: 'Kısa, basit metinleri okuyabiliyorum',
-    examples: 'weather, travel, shopping',
-    color: 'from-blue-400 to-blue-500',
+    title: 'Temel',
+    desc: 'Basit konularda kendinizi ifade edebiliyorsunuz',
+    examples: 'weather, travel, shopping, health',
     bg: 'bg-blue-50 border-blue-200',
     active: 'bg-blue-600 border-blue-600',
+    badge: '~1.000 kelime hedefi',
   },
   {
     level: 'B1',
-    title: 'Orta Seviye',
-    desc: 'Tanıdık konularda kendimi ifade edebiliyorum',
-    examples: 'politics, environment, culture',
-    color: 'from-indigo-400 to-indigo-500',
+    title: 'Orta',
+    desc: 'Tanıdık konularda akıcı iletişim kurabiliyorsunuz',
+    examples: 'opinion, environment, culture, work',
     bg: 'bg-indigo-50 border-indigo-200',
     active: 'bg-indigo-600 border-indigo-600',
+    badge: '~2.000 kelime hedefi',
   },
   {
     level: 'B2',
-    title: 'Orta-Üst Seviye',
-    desc: 'Karmaşık metinleri anlayabiliyorum',
-    examples: 'negotiation, economics, philosophy',
-    color: 'from-purple-400 to-purple-500',
+    title: 'Orta-İleri',
+    desc: 'Karmaşık metinleri anlayabiliyorsunuz',
+    examples: 'economics, debate, nuance, idioms',
     bg: 'bg-purple-50 border-purple-200',
     active: 'bg-purple-600 border-purple-600',
+    badge: '~3.500 kelime hedefi',
+  },
+  {
+    level: 'C1',
+    title: 'İleri',
+    desc: 'Akademik ve profesyonel dilde rahatsınız',
+    examples: 'rhetoric, legislation, inference',
+    bg: 'bg-rose-50 border-rose-200',
+    active: 'bg-rose-600 border-rose-600',
+    badge: '~5.000 kelime hedefi',
+  },
+  {
+    level: 'C2',
+    title: 'Ustalık',
+    desc: 'Neredeyse anadil düzeyinde İngilizce biliyorsunuz',
+    examples: 'erudite, vernacular, nuanced prose',
+    bg: 'bg-amber-50 border-amber-200',
+    active: 'bg-amber-600 border-amber-600',
+    badge: '~8.000 kelime hedefi',
   },
 ]
 
@@ -81,7 +99,7 @@ export default function OnboardingPage() {
         </div>
 
         <div className="space-y-3 mb-6">
-          {LEVELS.map(({ level, title, desc, examples, bg, active }) => {
+          {LEVELS.map(({ level, title, desc, examples, bg, active, badge }) => {
             const isSelected = selected === level
             return (
               <button
@@ -101,6 +119,7 @@ export default function OnboardingPage() {
                     <p className={`font-semibold text-sm ${isSelected ? 'text-white' : 'text-slate-800'}`}>{title}</p>
                     <p className={`text-xs mt-0.5 ${isSelected ? 'text-white/80' : 'text-slate-500'}`}>{desc}</p>
                     <p className={`text-[10px] mt-1 italic ${isSelected ? 'text-white/60' : 'text-slate-400'}`}>{examples}…</p>
+                    <span className={`inline-block text-[10px] font-semibold mt-1.5 px-1.5 py-0.5 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>{badge}</span>
                   </div>
                   {isSelected && (
                     <div className="w-5 h-5 rounded-full bg-white/30 flex items-center justify-center shrink-0 mt-0.5">

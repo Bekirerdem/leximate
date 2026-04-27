@@ -4,14 +4,15 @@ import { NextResponse } from 'next/server'
 
 const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
-// O seviyede kaç kelime öğrenince bir üst seviyeye geçilir
+// O seviyedeki toplam kelimelerin ~%75'ini öğrenince üst seviyeye geç
+// Hedef kelime sayıları: A0=150, A1=400, A2=500, B1=600, B2=700, C1=300
 const LEARNED_TO_LEVEL_UP: Record<string, number> = {
-  A0: 30,
-  A1: 50,
-  A2: 80,
-  B1: 100,
-  B2: 120,
-  C1: 150,
+  A0: 100,   // 150 kelimenin %67'si
+  A1: 300,   // 400 kelimenin %75'i
+  A2: 400,   // 500 kelimenin %80'i
+  B1: 500,   // 600 kelimenin %83'ü
+  B2: 600,   // 700 kelimenin %86'sı
+  C1: 240,   // 300 kelimenin %80'i
 }
 
 export async function POST(request: Request) {

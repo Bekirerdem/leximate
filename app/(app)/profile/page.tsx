@@ -4,7 +4,7 @@ import { Flame, Star, BookOpen, Trophy, TrendingUp, LogOut, Swords } from 'lucid
 
 const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const LEARNED_TO_LEVEL_UP: Record<string, number> = {
-  A0: 30, A1: 50, A2: 80, B1: 100, B2: 120, C1: 150,
+  A0: 100, A1: 300, A2: 400, B1: 500, B2: 600, C1: 240,
 }
 
 const LEVEL_COLORS: Record<string, string> = {
