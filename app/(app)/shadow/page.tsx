@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Mic, MicOff, Volume2, ChevronRight, RotateCcw } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from 'sonner'
 import type { Word } from '@/lib/types'
 
 type Phase = 'idle' | 'listening' | 'evaluating' | 'result'
@@ -89,8 +91,9 @@ export default function ShadowPage() {
       await evaluate(text)
     }
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
       setPhase('idle')
+      if (event.error !== 'aborted') toast.error('Mikrofon hatası: ' + event.error)
     }
 
     recognition.onend = () => {
@@ -134,7 +137,15 @@ export default function ShadowPage() {
     setResult(null)
   }
 
-  if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
+  if (loading) return (
+    <div className="space-y-4">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-2 w-full rounded-full" />
+      <Skeleton className="h-52 rounded-3xl" />
+      <Skeleton className="h-12 rounded-2xl" />
+      <Skeleton className="h-16 rounded-2xl" />
+    </div>
+  )
 
   if (words.length === 0) {
     return (

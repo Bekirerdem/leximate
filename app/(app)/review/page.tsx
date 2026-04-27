@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ReviewCard } from '@/components/review/ReviewCard'
 import { SessionProgress } from '@/components/learn/SessionProgress'
+import { ReviewSkeleton } from '@/components/ui/skeleton'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { UserWord } from '@/lib/types'
@@ -66,7 +67,7 @@ export default function ReviewPage() {
     }
   }
 
-  if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
+  if (loading) return <ReviewSkeleton />
 
   if (cards.length === 0) {
     return (

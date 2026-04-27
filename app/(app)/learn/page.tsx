@@ -6,6 +6,7 @@ import { WordCard } from '@/components/learn/WordCard'
 import { MultipleChoiceCard } from '@/components/learn/MultipleChoiceCard'
 import { SentenceCard } from '@/components/learn/SentenceCard'
 import { SessionProgress } from '@/components/learn/SessionProgress'
+import { LearnSkeleton } from '@/components/ui/skeleton'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Word } from '@/lib/types'
@@ -125,7 +126,7 @@ export default function LearnPage() {
     }
   }
 
-  if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
+  if (loading) return <LearnSkeleton />
 
   if (exercises.length === 0) {
     return (

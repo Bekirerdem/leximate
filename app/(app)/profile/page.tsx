@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Flame, Star, BookOpen, Trophy, TrendingUp, LogOut } from 'lucide-react'
+import { Flame, Star, BookOpen, Trophy, TrendingUp, LogOut, Swords } from 'lucide-react'
 
 const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const MASTERED_TO_LEVEL_UP = 50
@@ -23,6 +23,7 @@ export default async function ProfilePage() {
     { count: masteredWords },
     { count: learningWords },
     { data: recentSessions },
+    { data: duelRooms },
   ] = await Promise.all([
     supabase.from('user_words').select('*', { count: 'exact', head: true })
       .eq('user_id', user.id).neq('status', 'new'),
@@ -32,7 +33,19 @@ export default async function ProfilePage() {
       .eq('user_id', user.id).eq('status', 'learning'),
     supabase.from('daily_sessions').select('*')
       .eq('user_id', user.id).order('session_date', { ascending: false }).limit(7),
+    supabase.from('duel_rooms').select('challenger_id, opponent_id, challenger_score, opponent_score, status')
+      .or(`challenger_id.eq.${user.id},opponent_id.eq.${user.id}`)
+      .eq('status', 'completed'),
   ])
+
+  const duelTotal = duelRooms?.length ?? 0
+  const duelWins = duelRooms?.filter(r => {
+    const isChallenger = r.challenger_id === user.id
+    const myScore = isChallenger ? r.challenger_score : r.opponent_score
+    const opScore = isChallenger ? r.opponent_score : r.challenger_score
+    return myScore > opScore
+  }).length ?? 0
+  const duelWinRate = duelTotal > 0 ? Math.round((duelWins / duelTotal) * 100) : 0
 
   const currentLevel = profile?.cefr_level ?? 'A1'
   const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
@@ -110,6 +123,30 @@ export default async function ProfilePage() {
           <p className="text-3xl font-bold text-slate-900">{learningWords ?? 0}</p>
         </div>
       </div>
+
+      {/* Duel stats */}
+      {duelTotal > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Swords size={16} className="text-indigo-500" />
+            <h2 className="text-sm font-bold text-slate-700">Düello İstatistikleri</h2>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{duelTotal}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Toplam</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-emerald-600">{duelWins}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Galibiyet</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-indigo-600">{duelWinRate}%</p>
+              <p className="text-xs text-slate-500 mt-0.5">Kazanma Oranı</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Last 7 days */}
       {recentSessions && recentSessions.length > 0 && (

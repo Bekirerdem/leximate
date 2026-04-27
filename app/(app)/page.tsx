@@ -81,6 +81,17 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Streak warning */}
+      {streak > 0 && !goalCompleted && (
+        <div className="flex items-center gap-3 bg-orange-50 border border-orange-100 rounded-2xl p-4">
+          <span className="text-2xl shrink-0">🔥</span>
+          <div>
+            <p className="text-sm font-bold text-orange-800">{streak} günlük serinle bugün devam et!</p>
+            <p className="text-xs text-orange-500 mt-0.5">Öğrenmeden geçme, serinyi koru.</p>
+          </div>
+        </div>
+      )}
+
       {/* Daily goal */}
       <div className="bg-white rounded-3xl p-5 shadow-[0_2px_20px_rgba(0,0,0,0.06)] border border-slate-100">
         <div className="flex items-center justify-between mb-3">

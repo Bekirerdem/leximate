@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Swords, UserPlus, Clock, Trophy, Search, Zap } from 'lucide-react'
+import { Swords, UserPlus, Clock, Trophy, Search, Zap, X } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface Friend {
   id: string
@@ -109,11 +110,12 @@ export default function DuelPage() {
     if (!myId) return
     setAdding(true)
     const supabase = createClient()
-    await supabase.from('friendships').insert({ user_id_1: myId, user_id_2: friendId, status: 'pending' })
+    const { error } = await supabase.from('friendships').insert({ user_id_1: myId, user_id_2: friendId, status: 'pending' })
     setSearchResult(null)
     setUsername('')
     setAdding(false)
-    alert('Arkadaşlık isteği gönderildi!')
+    if (error) toast.error('İstek gönderilemedi, tekrar dene.')
+    else toast.success('Arkadaşlık isteği gönderildi!')
   }
 
   async function handleAcceptFriend(friendId: string) {
@@ -121,6 +123,16 @@ export default function DuelPage() {
     const supabase = createClient()
     await supabase.from('friendships').update({ status: 'active' })
       .eq('user_id_1', friendId).eq('user_id_2', myId)
+    toast.success('Arkadaşlık kabul edildi!')
+    loadAll()
+  }
+
+  async function handleRejectFriend(friendId: string) {
+    if (!myId) return
+    const supabase = createClient()
+    await supabase.from('friendships').delete()
+      .eq('user_id_1', friendId).eq('user_id_2', myId)
+    toast('İstek reddedildi.')
     loadAll()
   }
 
@@ -129,9 +141,16 @@ export default function DuelPage() {
     const supabase = createClient()
     const { data: words } = await supabase.from('words').select('id').limit(50)
     const rw = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
-    const { data: room } = await supabase.from('duel_rooms').insert({
-      challenger_id: myId, opponent_id: friendId, current_word_id: rw?.id,
+    const { data: room, error } = await supabase.from('duel_rooms').insert({
+      challenger_id: myId,
+      opponent_id: friendId,
+      current_word_id: rw?.id,
+      status: 'waiting',
+      challenger_score: 0,
+      opponent_score: 0,
+      rounds_total: 7,
     }).select().single()
+    if (error) { toast.error('Düello başlatılamadı.'); return }
     if (room) router.push(`/duel/${room.id}`)
   }
 
@@ -191,12 +210,20 @@ export default function DuelPage() {
                 <p className="font-semibold text-slate-800 text-sm">{f.username}</p>
                 <p className="text-xs text-slate-500">{f.cefr_level} · {f.streak_count} gün serisi</p>
               </div>
-              <button
-                onClick={() => handleAcceptFriend(f.id)}
-                className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-semibold hover:bg-amber-600 transition-colors"
-              >
-                Kabul Et
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleRejectFriend(f.id)}
+                  className="p-1.5 border border-slate-200 text-slate-400 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+                <button
+                  onClick={() => handleAcceptFriend(f.id)}
+                  className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-semibold hover:bg-amber-600 transition-colors"
+                >
+                  Kabul Et
+                </button>
+              </div>
             </div>
           ))}
         </div>

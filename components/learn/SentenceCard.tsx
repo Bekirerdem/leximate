@@ -21,7 +21,8 @@ export function SentenceCard({ word, options, onResult }: SentenceCardProps) {
 
   const hasSentence = !!word.example_sentence
   const blanked = hasSentence ? blankSentence(word.example_sentence!, word.english) : null
-  const sentenceChanged = blanked !== word.example_sentence
+  // sentenceChanged: word was found and replaced in the sentence
+  const sentenceChanged = hasSentence && blanked !== null && blanked !== word.example_sentence
 
   function handleSelect(option: string) {
     if (selected) return

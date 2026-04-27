@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Swords, Trophy, Clock } from 'lucide-react'
+import { Swords, Clock } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import type { Word } from '@/lib/types'
 
 interface Room {
@@ -117,7 +118,7 @@ export default function DuelRoomPage() {
     return () => clearTimeout(t)
   }, [countdown, myAnswered, word, room?.status])
 
-  // Check if both answered
+  // Check if both answered — only challenger advances the round to avoid race condition
   useEffect(() => {
     if (!myId || !room) return
     const myAnswer = roundAnswers.find(a => a.user_id === myId)
@@ -128,8 +129,10 @@ export default function DuelRoomPage() {
       else if (!myAnswer.correct && opAnswer.correct) setRoundResult('lose')
       else setRoundResult('draw')
 
-      // Advance round after 2s
-      setTimeout(() => advanceRound(myAnswer.correct, opAnswer.correct), 2000)
+      // Only challenger writes to DB to prevent race condition
+      if (myId === room.challenger_id) {
+        setTimeout(() => advanceRound(myAnswer.correct, opAnswer.correct), 2000)
+      }
     }
   }, [roundAnswers, myId, room])
 
@@ -150,30 +153,38 @@ export default function DuelRoomPage() {
     })
   }
 
-  async function advanceRound(mCorrect: boolean, opCorrect: boolean) {
+  async function advanceRound(myCorrect: boolean, opCorrect: boolean) {
     setWaitingForOpponent(false)
     const supabase = createClient()
-    const newChallengerScore = room!.challenger_id === myId
-      ? room!.challenger_score + (mCorrect ? 1 : 0)
-      : room!.challenger_score + (opCorrect ? 1 : 0)
-    const newOpponentScore = room!.opponent_id === myId
-      ? room!.opponent_score + (mCorrect ? 1 : 0)
-      : room!.opponent_score + (opCorrect ? 1 : 0)
 
-    // Get next word
-    const { data: words } = await supabase.from('words').select('id').limit(100)
-    const nextWord = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
+    // challenger calls this, so myCorrect = challenger's correct
+    const newChallengerScore = room!.challenger_score + (myCorrect ? 1 : 0)
+    const newOpponentScore = room!.opponent_score + (opCorrect ? 1 : 0)
 
-    const totalRoundsPlayed = roundAnswers.length > 0 ? room!.rounds_total - 1 : room!.rounds_total - 1
-    const isLastRound = totalRoundsPlayed <= 0
+    const remaining = (room!.rounds_total ?? 7) - 1
+    const isLastRound = remaining <= 0
+
+    // Get next word only if game continues
+    let nextWordId = room!.current_word_id
+    if (!isLastRound) {
+      const { data: words } = await supabase.from('words').select('id').limit(100)
+      const nw = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
+      if (nw) nextWordId = nw.id
+    }
 
     await supabase.from('duel_rooms').update({
       challenger_score: newChallengerScore,
       opponent_score: newOpponentScore,
-      current_word_id: nextWord?.id,
-      rounds_total: room!.rounds_total - 1,
+      current_word_id: nextWordId,
+      rounds_total: remaining,
       status: isLastRound ? 'completed' : 'active',
     }).eq('id', id)
+
+    if (isLastRound) {
+      const iWon = newChallengerScore > newOpponentScore
+      const isDraw = newChallengerScore === newOpponentScore
+      toast(isDraw ? '🤝 Beraberlik!' : iWon ? '🏆 Kazandın!' : '😔 Kaybettin!')
+    }
   }
 
   if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
