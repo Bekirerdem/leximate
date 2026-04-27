@@ -7,12 +7,12 @@ const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 // O seviyedeki toplam kelimelerin ~%75'ini öğrenince üst seviyeye geç
 // Hedef kelime sayıları: A0=150, A1=400, A2=500, B1=600, B2=700, C1=300
 const LEARNED_TO_LEVEL_UP: Record<string, number> = {
-  A0: 100,   // 150 kelimenin %67'si
-  A1: 300,   // 400 kelimenin %75'i
-  A2: 400,   // 500 kelimenin %80'i
-  B1: 500,   // 600 kelimenin %83'ü
-  B2: 600,   // 700 kelimenin %86'sı
-  C1: 240,   // 300 kelimenin %80'i
+  A0: 100,   // 163 kelimenin ~%61'i
+  A1: 250,   // 294 kelimenin ~%85'i
+  A2: 380,   // 423 kelimenin ~%90'ı
+  B1: 470,   // 522 kelimenin ~%90'ı
+  B2: 560,   // 624 kelimenin ~%90'ı
+  C1: 240,   // 355 kelimenin ~%68'i
 }
 
 export async function POST(request: Request) {

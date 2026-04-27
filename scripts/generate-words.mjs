@@ -82,13 +82,15 @@ async function getExistingWords() {
 }
 
 async function getCurrentCounts() {
-  const { data } = await supabase
-    .from('words')
-    .select('cefr_level')
+  const levels = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
   const counts = {}
-  for (const w of data ?? []) {
-    counts[w.cefr_level] = (counts[w.cefr_level] ?? 0) + 1
-  }
+  await Promise.all(levels.map(async (level) => {
+    const { count } = await supabase
+      .from('words')
+      .select('*', { count: 'exact', head: true })
+      .eq('cefr_level', level)
+    counts[level] = count ?? 0
+  }))
   return counts
 }
 
