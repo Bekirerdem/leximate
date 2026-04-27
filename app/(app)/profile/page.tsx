@@ -1,7 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Flame, Star, BookOpen, Trophy, TrendingUp, LogOut } from 'lucide-react'
+
+const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const MASTERED_TO_LEVEL_UP = 50
+
+const LEVEL_COLORS: Record<string, string> = {
+  A0: 'bg-slate-500', A1: 'bg-emerald-500', A2: 'bg-blue-500',
+  B1: 'bg-indigo-500', B2: 'bg-purple-500', C1: 'bg-pink-500', C2: 'bg-rose-500',
+}
 
 export default async function ProfilePage() {
   const supabase = await createClient()
@@ -9,67 +16,133 @@ export default async function ProfilePage() {
   if (!user) redirect('/login')
 
   const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+    .from('profiles').select('*').eq('id', user.id).single()
 
-  const { count: totalWords } = await supabase
-    .from('user_words')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .neq('status', 'new')
+  const [
+    { count: totalWords },
+    { count: masteredWords },
+    { count: learningWords },
+    { data: recentSessions },
+  ] = await Promise.all([
+    supabase.from('user_words').select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id).neq('status', 'new'),
+    supabase.from('user_words').select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id).eq('status', 'mastered'),
+    supabase.from('user_words').select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id).eq('status', 'learning'),
+    supabase.from('daily_sessions').select('*')
+      .eq('user_id', user.id).order('session_date', { ascending: false }).limit(7),
+  ])
 
-  const { count: masteredWords } = await supabase
-    .from('user_words')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('status', 'mastered')
+  const currentLevel = profile?.cefr_level ?? 'A1'
+  const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
+  const nextLevel = currentLevelIdx < LEVEL_ORDER.length - 1 ? LEVEL_ORDER[currentLevelIdx + 1] : null
+  const progressToNext = Math.min((masteredWords ?? 0) / MASTERED_TO_LEVEL_UP * 100, 100)
+  const totalLearned = (totalWords ?? 0)
 
   return (
     <div className="space-y-4">
-      <div className="text-center py-4">
-        <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
-          <span className="text-2xl font-bold text-blue-600">
+      {/* Hero */}
+      <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-6 text-white">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold">
             {profile?.username?.[0]?.toUpperCase()}
-          </span>
+          </div>
+          <div className="flex-1">
+            <h1 className="text-xl font-bold">{profile?.username}</h1>
+            <p className="text-blue-200 text-sm">{user.email}</p>
+          </div>
+          <form action="/auth/signout" method="POST">
+            <button type="submit" className="text-white/60 hover:text-white transition-colors">
+              <LogOut size={18} />
+            </button>
+          </form>
         </div>
-        <h1 className="text-xl font-bold text-slate-900">{profile?.username}</h1>
-        <p className="text-slate-500 text-sm">{user.email}</p>
+
+        <div className="mt-5 flex items-center gap-3">
+          <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${LEVEL_COLORS[currentLevel] ?? 'bg-white/20'}`}>
+            {currentLevel}
+          </span>
+          <span className="text-white/80 text-sm font-medium">Seviye</span>
+          {nextLevel && (
+            <span className="ml-auto text-blue-200 text-xs">{nextLevel} için {Math.max(0, MASTERED_TO_LEVEL_UP - (masteredWords ?? 0))} kelime</span>
+          )}
+        </div>
+
+        {nextLevel && (
+          <div className="mt-2 h-2 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-white rounded-full transition-all"
+              style={{ width: `${progressToNext}%` }}
+            />
+          </div>
+        )}
       </div>
 
+      {/* Stats grid */}
       <div className="grid grid-cols-2 gap-3">
-        <Card className="text-center">
-          <CardContent className="pt-4 pb-3">
-            <Badge variant="outline" className="text-lg font-bold px-4 py-1">
-              {profile?.cefr_level}
-            </Badge>
-            <div className="text-xs text-slate-500 mt-2">Seviye</div>
-          </CardContent>
-        </Card>
-        <Card className="text-center">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-2xl font-bold text-orange-500">🔥 {profile?.streak_count ?? 0}</div>
-            <div className="text-xs text-slate-500 mt-1">Gün serisi</div>
-          </CardContent>
-        </Card>
+        <div className="bg-white rounded-2xl p-4 border border-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <Flame size={18} className="text-orange-500" />
+            <span className="text-xs text-slate-500 font-medium">Gün Serisi</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{profile?.streak_count ?? 0}</p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <BookOpen size={18} className="text-blue-500" />
+            <span className="text-xs text-slate-500 font-medium">Öğrenilen</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{totalLearned}</p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <Trophy size={18} className="text-emerald-500" />
+            <span className="text-xs text-slate-500 font-medium">Ezberlenen</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{masteredWords ?? 0}</p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <TrendingUp size={18} className="text-indigo-500" />
+            <span className="text-xs text-slate-500 font-medium">Öğreniliyor</span>
+          </div>
+          <p className="text-3xl font-bold text-slate-900">{learningWords ?? 0}</p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">İstatistikler</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex justify-between">
-            <span className="text-slate-600">Toplam öğrenilen</span>
-            <span className="font-semibold">{totalWords ?? 0} kelime</span>
+      {/* Last 7 days */}
+      {recentSessions && recentSessions.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Star size={16} className="text-amber-500" />
+            <h2 className="text-sm font-bold text-slate-700">Son 7 Gün</h2>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-600">Ezberlenen</span>
-            <span className="font-semibold text-green-600">{masteredWords ?? 0} kelime</span>
+          <div className="space-y-2">
+            {recentSessions.map(s => (
+              <div key={s.id} className="flex items-center justify-between">
+                <span className="text-sm text-slate-600">
+                  {new Date(s.session_date).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400">{s.words_learned} yeni · {s.words_reviewed} tekrar</span>
+                  {s.completed && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
+
+      {/* Change level link */}
+      <a
+        href="/onboarding"
+        className="block w-full text-center py-3.5 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 text-sm font-medium hover:border-blue-300 hover:text-blue-500 transition-colors"
+      >
+        Seviyeni Değiştir →
+      </a>
     </div>
   )
 }

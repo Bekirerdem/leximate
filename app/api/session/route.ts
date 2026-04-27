@@ -2,6 +2,9 @@ import { createClient } from '@/lib/supabase/server'
 import { calculateNextReview } from '@/lib/srs/sm2'
 import { NextResponse } from 'next/server'
 
+const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const MASTERED_TO_LEVEL_UP = 50
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -58,9 +61,12 @@ export async function POST(request: Request) {
     .eq('session_date', today)
     .single()
 
+  const isNewWord = !existing
+  let leveledUp = false
+
   if (dailySession) {
-    const newWordsLearned = dailySession.words_learned + (!existing ? 1 : 0)
-    const newWordsReviewed = dailySession.words_reviewed + (existing ? 1 : 0)
+    const newWordsLearned = dailySession.words_learned + (isNewWord ? 1 : 0)
+    const newWordsReviewed = dailySession.words_reviewed + (!isNewWord ? 1 : 0)
     const completed = newWordsLearned >= 10
 
     await supabase
@@ -71,7 +77,7 @@ export async function POST(request: Request) {
     if (completed && !dailySession.completed) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('streak_count, streak_last_date')
+        .select('streak_count, streak_last_date, cefr_level')
         .eq('id', user.id)
         .single()
 
@@ -87,16 +93,37 @@ export async function POST(request: Request) {
         .from('profiles')
         .update({ streak_count: newStreak, streak_last_date: today })
         .eq('id', user.id)
+
+      // CEFR seviye atlama kontrolü
+      const currentLevel = profile?.cefr_level ?? 'A1'
+      const { count: masteredCount } = await supabase
+        .from('user_words')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('status', 'mastered')
+
+      const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
+      if (
+        (masteredCount ?? 0) >= MASTERED_TO_LEVEL_UP &&
+        currentLevelIdx < LEVEL_ORDER.length - 1
+      ) {
+        const nextLevel = LEVEL_ORDER[currentLevelIdx + 1]
+        await supabase
+          .from('profiles')
+          .update({ cefr_level: nextLevel })
+          .eq('id', user.id)
+        leveledUp = true
+      }
     }
   } else {
     await supabase.from('daily_sessions').insert({
       user_id: user.id,
       session_date: today,
-      words_learned: !existing ? 1 : 0,
-      words_reviewed: existing ? 1 : 0,
+      words_learned: isNewWord ? 1 : 0,
+      words_reviewed: !isNewWord ? 1 : 0,
       completed: false,
     })
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, leveledUp })
 }

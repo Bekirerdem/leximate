@@ -73,7 +73,7 @@ create policy "profiles_select_friends" on profiles for select using (
   exists (
     select 1 from friendships
     where status = 'active'
-    and ((user_id_1 = auth.uid() and user_id_2 = id) or (user_id_2 = auth.uid() and user_id_1 = id))
+    and ((user_id_1 = auth.uid() and user_id_2 = profiles.id) or (user_id_2 = auth.uid() and user_id_1 = profiles.id))
   )
 );
 

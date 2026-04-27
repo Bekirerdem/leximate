@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { WordCard } from '@/components/learn/WordCard'
+import { MultipleChoiceCard } from '@/components/learn/MultipleChoiceCard'
+import { SentenceCard } from '@/components/learn/SentenceCard'
 import { SessionProgress } from '@/components/learn/SessionProgress'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -11,89 +13,160 @@ import Link from 'next/link'
 
 const DAILY_WORD_COUNT = 10
 
+type Exercise =
+  | { type: 'flip'; word: Word }
+  | { type: 'mc'; word: Word; options: string[] }
+  | { type: 'sentence'; word: Word; options: string[] }
+
 export default function LearnPage() {
-  const [words, setWords] = useState<Word[]>([])
+  const [exercises, setExercises] = useState<Exercise[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completed, setCompleted] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [score, setScore] = useState({ correct: 0, total: 0 })
+  const [leveledUp, setLeveledUp] = useState(false)
 
-  useEffect(() => {
-    loadTodaysWords()
-  }, [])
+  useEffect(() => { loadSession() }, [])
 
-  async function loadTodaysWords() {
+  async function loadSession() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
     const { data: profile } = await supabase
-      .from('profiles')
-      .select('cefr_level')
-      .eq('id', user.id)
-      .single()
+      .from('profiles').select('cefr_level').eq('id', user.id).single()
+    const level = profile?.cefr_level ?? 'A1'
 
     const { data: seenWordIds } = await supabase
-      .from('user_words')
-      .select('word_id')
-      .eq('user_id', user.id)
-
+      .from('user_words').select('word_id').eq('user_id', user.id)
     const excludeIds = seenWordIds?.map(r => r.word_id) ?? []
 
-    let query = supabase
-      .from('words')
-      .select('*')
-      .eq('cefr_level', profile?.cefr_level ?? 'A1')
-      .limit(DAILY_WORD_COUNT)
+    let query = supabase.from('words').select('*').eq('cefr_level', level).limit(DAILY_WORD_COUNT)
+    if (excludeIds.length > 0) query = query.not('id', 'in', `(${excludeIds.join(',')})`)
+    const { data: newWords } = await query
 
-    if (excludeIds.length > 0) {
-      query = query.not('id', 'in', `(${excludeIds.join(',')})`)
+    if (!newWords || newWords.length === 0) {
+      setExercises([])
+      setLoading(false)
+      return
     }
 
-    const { data: newWords } = await query
-    setWords(newWords ?? [])
+    // Distractor pool (Turkish for MC, English for sentence)
+    const { data: poolWords } = await supabase
+      .from('words').select('english, turkish').eq('cefr_level', level).limit(150)
+
+    const pool = poolWords ?? []
+    const learnTurkish = new Set(newWords.map(w => w.turkish))
+    const learnEnglish = new Set(newWords.map(w => w.english.toLowerCase()))
+
+    // Phase 1: Flip cards (learn)
+    const flipExercises: Exercise[] = newWords.map(w => ({ type: 'flip', word: w }))
+
+    // Phase 2: Multiple choice — show English, pick Turkish
+    const mcExercises: Exercise[] = newWords.map(w => {
+      const distractors = pool
+        .map(p => p.turkish)
+        .filter(t => t !== w.turkish && !learnTurkish.has(t))
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3)
+      const options = [...distractors, w.turkish].sort(() => Math.random() - 0.5)
+      return { type: 'mc', word: w, options }
+    })
+
+    // Phase 3: Sentence completion — show sentence with blank, pick English word
+    const sentenceExercises: Exercise[] = newWords
+      .filter(w => !!w.example_sentence)
+      .map(w => {
+        const distractors = pool
+          .map(p => p.english)
+          .filter(e => e.toLowerCase() !== w.english.toLowerCase() && !learnEnglish.has(e.toLowerCase()))
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3)
+        const options = [...distractors, w.english].sort(() => Math.random() - 0.5)
+        return { type: 'sentence', word: w, options }
+      })
+
+    // If some words have no sentence, fill with MC-style repeats
+    const sentenceFiller: Exercise[] = newWords
+      .filter(w => !w.example_sentence)
+      .map(w => {
+        const distractors = pool
+          .map(p => p.turkish)
+          .filter(t => t !== w.turkish && !learnTurkish.has(t))
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3)
+        const options = [...distractors, w.turkish].sort(() => Math.random() - 0.5)
+        return { type: 'mc', word: w, options }
+      })
+
+    setExercises([...flipExercises, ...mcExercises, ...sentenceExercises, ...sentenceFiller])
     setLoading(false)
   }
 
   async function handleResult(correct: boolean) {
-    const word = words[currentIndex]
+    const ex = exercises[currentIndex]
 
-    await fetch('/api/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wordId: word.id, correct }),
-    })
+    if (ex.type === 'flip') {
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wordId: ex.word.id, correct }),
+      })
+      const data = await res.json()
+      if (data.leveledUp) setLeveledUp(true)
+    } else {
+      setScore(s => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }))
+    }
 
-    if (currentIndex + 1 >= words.length) {
+    if (currentIndex + 1 >= exercises.length) {
       setCompleted(true)
     } else {
       setCurrentIndex(i => i + 1)
     }
   }
 
-  if (loading) {
-    return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
-  }
+  if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
 
-  if (words.length === 0) {
+  if (exercises.length === 0) {
     return (
       <div className="text-center space-y-4 py-20">
-        <p className="text-slate-600">Bu seviyede yeni kelime kalmadı 🎉</p>
-        <Link href="/review" className={cn(buttonVariants({ variant: 'outline' }))}>
-          Tekrar Yapmaya Git
-        </Link>
+        <p className="text-5xl">🎉</p>
+        <p className="text-slate-700 font-bold text-lg">Bu seviyede yeni kelime kalmadı!</p>
+        <Link href="/review" className={cn(buttonVariants({ variant: 'outline' }))}>Tekrar Yapmaya Git</Link>
       </div>
     )
   }
 
   if (completed) {
+    const pct = score.total > 0 ? Math.round((score.correct / score.total) * 100) : 0
+    const emoji = pct >= 80 ? '🏆' : pct >= 50 ? '📚' : '💪'
+    const wordCount = exercises.filter(e => e.type === 'flip').length
     return (
-      <div className="text-center space-y-6 py-20">
-        <div className="text-5xl">🎉</div>
+      <div className="text-center space-y-5 py-8">
+        {leveledUp && (
+          <div className="rounded-3xl p-5 text-white text-center" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>
+            <p className="text-4xl mb-2">🎊</p>
+            <p className="text-xl font-black">Seviye Atladın!</p>
+            <p className="text-white/80 text-sm mt-1">Tebrikler, bir üst seviyeye geçtin</p>
+          </div>
+        )}
+        <div className="text-6xl">{emoji}</div>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Harika!</h2>
-          <p className="text-slate-500 mt-1">Bugünkü kelime turunu tamamladın</p>
+          <h2 className="text-2xl font-bold text-slate-900">Tur Tamamlandı!</h2>
+          <p className="text-slate-500 mt-1">{wordCount} yeni kelime · 3 aşama</p>
+        </div>
+        <div className="bg-white rounded-3xl shadow-[0_4px_24px_rgba(0,0,0,0.06)] p-5">
+          <div className="text-4xl font-black text-indigo-600">{pct}%</div>
+          <p className="text-slate-500 text-sm mt-1">Pratik başarısı · {score.correct}/{score.total} doğru</p>
         </div>
         <div className="flex flex-col gap-3">
+          <Link
+            href="/shadow"
+            className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-white font-bold shadow-[0_4px_14px_rgba(139,92,246,0.35)]"
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+          >
+            🎙️ Telaffuz Pratiği Yap
+          </Link>
           <Link href="/review" className={cn(buttonVariants(), 'justify-center')}>
             Tekrar Turuna Geç
           </Link>
@@ -105,10 +178,40 @@ export default function LearnPage() {
     )
   }
 
+  const ex = exercises[currentIndex]
+  const flipCount = exercises.filter(e => e.type === 'flip').length
+  const mcCount = exercises.filter(e => e.type === 'mc').length
+
+  let phase: 'words' | 'practice' | 'sentences'
+  let phaseIndex: number
+  let phaseTotal: number
+
+  if (currentIndex < flipCount) {
+    phase = 'words'
+    phaseIndex = currentIndex
+    phaseTotal = flipCount
+  } else if (currentIndex < flipCount + mcCount) {
+    phase = 'practice'
+    phaseIndex = currentIndex - flipCount
+    phaseTotal = mcCount
+  } else {
+    phase = 'sentences'
+    phaseIndex = currentIndex - flipCount - mcCount
+    phaseTotal = exercises.length - flipCount - mcCount
+  }
+
   return (
     <div className="space-y-6">
-      <SessionProgress current={currentIndex} total={words.length} phase="words" />
-      <WordCard key={words[currentIndex].id} word={words[currentIndex]} onResult={handleResult} />
+      <SessionProgress current={phaseIndex} total={phaseTotal} phase={phase === 'sentences' ? 'sentences' : phase === 'practice' ? 'practice' : 'words'} />
+      {ex.type === 'flip' && (
+        <WordCard key={ex.word.id} word={ex.word} onResult={handleResult} />
+      )}
+      {ex.type === 'mc' && (
+        <MultipleChoiceCard key={`mc-${ex.word.id}`} word={ex.word} options={ex.options} onResult={handleResult} />
+      )}
+      {ex.type === 'sentence' && (
+        <SentenceCard key={`s-${ex.word.id}`} word={ex.word} options={ex.options} onResult={handleResult} />
+      )}
     </div>
   )
 }
