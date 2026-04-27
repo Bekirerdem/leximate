@@ -3,7 +3,16 @@ import { calculateNextReview } from '@/lib/srs/sm2'
 import { NextResponse } from 'next/server'
 
 const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
-const MASTERED_TO_LEVEL_UP = 50
+
+// O seviyede kaç kelime öğrenince bir üst seviyeye geçilir
+const LEARNED_TO_LEVEL_UP: Record<string, number> = {
+  A0: 30,
+  A1: 50,
+  A2: 80,
+  B1: 100,
+  B2: 120,
+  C1: 150,
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -20,6 +29,7 @@ export async function POST(request: Request) {
     .single()
 
   const quality = correct ? 4 : 1
+  const isNewWord = !existing
 
   if (!existing) {
     const result = calculateNextReview({ ease_factor: 2.5, interval_days: 1, correct_count: 0, quality })
@@ -52,7 +62,7 @@ export async function POST(request: Request) {
     }).eq('id', existing.id)
   }
 
-  // Günlük session güncelle ve streak kontrol et
+  // Günlük session güncelle
   const today = new Date().toISOString().split('T')[0]
   const { data: dailySession } = await supabase
     .from('daily_sessions')
@@ -61,7 +71,6 @@ export async function POST(request: Request) {
     .eq('session_date', today)
     .single()
 
-  const isNewWord = !existing
   let leveledUp = false
 
   if (dailySession) {
@@ -74,10 +83,11 @@ export async function POST(request: Request) {
       .update({ words_learned: newWordsLearned, words_reviewed: newWordsReviewed, completed })
       .eq('id', dailySession.id)
 
+    // Streak: günlük hedef ilk tamamlanınca
     if (completed && !dailySession.completed) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('streak_count, streak_last_date, cefr_level')
+        .select('streak_count, streak_last_date')
         .eq('id', user.id)
         .single()
 
@@ -93,27 +103,6 @@ export async function POST(request: Request) {
         .from('profiles')
         .update({ streak_count: newStreak, streak_last_date: today })
         .eq('id', user.id)
-
-      // CEFR seviye atlama kontrolü
-      const currentLevel = profile?.cefr_level ?? 'A1'
-      const { count: masteredCount } = await supabase
-        .from('user_words')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('status', 'mastered')
-
-      const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
-      if (
-        (masteredCount ?? 0) >= MASTERED_TO_LEVEL_UP &&
-        currentLevelIdx < LEVEL_ORDER.length - 1
-      ) {
-        const nextLevel = LEVEL_ORDER[currentLevelIdx + 1]
-        await supabase
-          .from('profiles')
-          .update({ cefr_level: nextLevel })
-          .eq('id', user.id)
-        leveledUp = true
-      }
     }
   } else {
     await supabase.from('daily_sessions').insert({
@@ -123,6 +112,38 @@ export async function POST(request: Request) {
       words_reviewed: !isNewWord ? 1 : 0,
       completed: false,
     })
+  }
+
+  // Seviye atlama: her yeni kelime öğreniminde kontrol et
+  if (isNewWord && correct) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('cefr_level')
+      .eq('id', user.id)
+      .single()
+
+    const currentLevel = profile?.cefr_level ?? 'A1'
+    const threshold = LEARNED_TO_LEVEL_UP[currentLevel]
+    const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
+
+    if (threshold && currentLevelIdx < LEVEL_ORDER.length - 1) {
+      // Bu seviyedeki öğrenilmiş kelime sayısını say (words tablosuna join)
+      const { count: learnedAtLevel } = await supabase
+        .from('user_words')
+        .select('*, words!inner(cefr_level)', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .neq('status', 'new')
+        .eq('words.cefr_level', currentLevel)
+
+      if ((learnedAtLevel ?? 0) >= threshold) {
+        const nextLevel = LEVEL_ORDER[currentLevelIdx + 1]
+        await supabase
+          .from('profiles')
+          .update({ cefr_level: nextLevel })
+          .eq('id', user.id)
+        leveledUp = true
+      }
+    }
   }
 
   return NextResponse.json({ success: true, leveledUp })

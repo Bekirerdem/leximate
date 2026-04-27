@@ -30,7 +30,7 @@ export function calculateNextReview(input: SM2Input): SM2Output {
     )
 
     if (correct_count === 0) {
-      newInterval = 1
+      newInterval = 0  // ilk öğrenmede bugün review'a girer
     } else if (correct_count === 1) {
       newInterval = 6
     } else {

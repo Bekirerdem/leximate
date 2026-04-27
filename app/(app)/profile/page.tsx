@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 import { Flame, Star, BookOpen, Trophy, TrendingUp, LogOut, Swords } from 'lucide-react'
 
 const LEVEL_ORDER = ['A0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
-const MASTERED_TO_LEVEL_UP = 50
+const LEARNED_TO_LEVEL_UP: Record<string, number> = {
+  A0: 30, A1: 50, A2: 80, B1: 100, B2: 120, C1: 150,
+}
 
 const LEVEL_COLORS: Record<string, string> = {
   A0: 'bg-slate-500', A1: 'bg-emerald-500', A2: 'bg-blue-500',
@@ -24,6 +26,7 @@ export default async function ProfilePage() {
     { count: learningWords },
     { data: recentSessions },
     { data: duelRooms },
+    { count: learnedAtCurrentLevel },
   ] = await Promise.all([
     supabase.from('user_words').select('*', { count: 'exact', head: true })
       .eq('user_id', user.id).neq('status', 'new'),
@@ -36,6 +39,11 @@ export default async function ProfilePage() {
     supabase.from('duel_rooms').select('challenger_id, opponent_id, challenger_score, opponent_score, status')
       .or(`challenger_id.eq.${user.id},opponent_id.eq.${user.id}`)
       .eq('status', 'completed'),
+    supabase.from('user_words')
+      .select('*, words!inner(cefr_level)', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .neq('status', 'new')
+      .eq('words.cefr_level', profile?.cefr_level ?? 'A1'),
   ])
 
   const duelTotal = duelRooms?.length ?? 0
@@ -50,7 +58,9 @@ export default async function ProfilePage() {
   const currentLevel = profile?.cefr_level ?? 'A1'
   const currentLevelIdx = LEVEL_ORDER.indexOf(currentLevel)
   const nextLevel = currentLevelIdx < LEVEL_ORDER.length - 1 ? LEVEL_ORDER[currentLevelIdx + 1] : null
-  const progressToNext = Math.min((masteredWords ?? 0) / MASTERED_TO_LEVEL_UP * 100, 100)
+  const threshold = LEARNED_TO_LEVEL_UP[currentLevel] ?? 50
+  const learnedCount = learnedAtCurrentLevel ?? 0
+  const progressToNext = Math.min(learnedCount / threshold * 100, 100)
   const totalLearned = (totalWords ?? 0)
 
   return (
@@ -78,7 +88,7 @@ export default async function ProfilePage() {
           </span>
           <span className="text-white/80 text-sm font-medium">Seviye</span>
           {nextLevel && (
-            <span className="ml-auto text-blue-200 text-xs">{nextLevel} için {Math.max(0, MASTERED_TO_LEVEL_UP - (masteredWords ?? 0))} kelime</span>
+            <span className="ml-auto text-blue-200 text-xs">{nextLevel} için {Math.max(0, threshold - learnedCount)} kelime</span>
           )}
         </div>
 
