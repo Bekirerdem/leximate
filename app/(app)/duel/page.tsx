@@ -38,7 +38,33 @@ export default function DuelPage() {
   const [adding, setAdding] = useState(false)
   const [myId, setMyId] = useState<string | null>(null)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null
+
+    const init = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      await loadAll()
+
+      // Realtime: bana gelen yeni düello davetleri (opponent_id = ben, status = waiting)
+      channel = supabase
+        .channel(`duel_invites_${user.id}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'duel_rooms', filter: `opponent_id=eq.${user.id}` },
+          () => { loadAll() }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'friendships', filter: `user_id_2=eq.${user.id}` },
+          () => { loadAll() }
+        )
+        .subscribe()
+    }
+    init()
+    return () => { if (channel) channel.unsubscribe() }
+  }, [])
 
   async function loadAll() {
     const supabase = createClient()
@@ -139,12 +165,32 @@ export default function DuelPage() {
   async function handleChallenge(friendId: string) {
     if (!myId) return
     const supabase = createClient()
-    const { data: words } = await supabase.from('words').select('id').limit(50)
-    const rw = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
+
+    // Hem benim hem rakibin seviyesini al — düşük olanı baz alıyoruz ki ikisi de bilebilsin
+    const friend = friends.find(f => f.id === friendId)
+    const { data: me } = await supabase.from('profiles').select('cefr_level').eq('id', myId).single()
+    const myLevel = me?.cefr_level ?? 'A1'
+    const opLevel = friend?.cefr_level ?? 'A1'
+    const order = ['A0','A1','A2','B1','B2','C1','C2']
+    const sharedLevel = order[Math.min(order.indexOf(myLevel), order.indexOf(opLevel))]
+
+    // Sadece her ikisinin de bildiği kelime havuzundan seç
+    const { data: words } = await supabase
+      .from('words')
+      .select('id')
+      .eq('cefr_level', sharedLevel)
+      .limit(200)
+
+    if (!words || words.length === 0) {
+      toast.error('Bu seviyede kelime bulunamadı.')
+      return
+    }
+    const rw = words[Math.floor(Math.random() * words.length)]
+
     const { data: room, error } = await supabase.from('duel_rooms').insert({
       challenger_id: myId,
       opponent_id: friendId,
-      current_word_id: rw?.id,
+      current_word_id: rw.id,
       status: 'waiting',
       challenger_score: 0,
       opponent_score: 0,

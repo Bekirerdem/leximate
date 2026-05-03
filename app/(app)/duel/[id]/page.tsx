@@ -164,10 +164,14 @@ export default function DuelRoomPage() {
     const remaining = (room!.rounds_total ?? 7) - 1
     const isLastRound = remaining <= 0
 
-    // Get next word only if game continues
+    // Sıradaki kelimeyi mevcut kelimenin seviyesinden seç (düello tek seviyede kalsın)
     let nextWordId = room!.current_word_id
     if (!isLastRound) {
-      const { data: words } = await supabase.from('words').select('id').limit(100)
+      const { data: currentWord } = await supabase
+        .from('words').select('cefr_level').eq('id', room!.current_word_id).single()
+      const level = currentWord?.cefr_level ?? 'A1'
+      const { data: words } = await supabase
+        .from('words').select('id').eq('cefr_level', level).limit(200)
       const nw = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
       if (nw) nextWordId = nw.id
     }
