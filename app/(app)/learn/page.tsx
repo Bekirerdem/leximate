@@ -17,7 +17,7 @@ const DAILY_WORD_COUNT = 10
 type Exercise =
   | { type: 'flip'; word: Word }
   | { type: 'mc'; word: Word; options: string[] }
-  | { type: 'sentence'; word: Word; options: string[] }
+  | { type: 'sentence'; word: Word; options: string[]; sentence: string; translation: string }
 
 export default function LearnPage() {
   const [exercises, setExercises] = useState<Exercise[]>([])
@@ -74,22 +74,39 @@ export default function LearnPage() {
       return { type: 'mc', word: w, options }
     })
 
-    // Phase 3: Sentence completion — show sentence with blank, pick English word
+    // Phase 3: Sentence completion — Gemini'den context-aware cümle çek (paralel)
+    const sentenceResults = await Promise.all(
+      newWords.map(async w => {
+        try {
+          const res = await fetch('/api/sentence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wordId: w.id }),
+          })
+          if (!res.ok) return null
+          return (await res.json()) as { sentence: string; translation: string }
+        } catch {
+          return null
+        }
+      })
+    )
+
     const sentenceExercises: Exercise[] = newWords
-      .filter(w => !!w.example_sentence)
-      .map(w => {
+      .map((w, i) => ({ word: w, data: sentenceResults[i] }))
+      .filter((x): x is { word: Word; data: { sentence: string; translation: string } } => !!x.data)
+      .map(({ word: w, data }) => {
         const distractors = pool
           .map(p => p.english)
           .filter(e => e.toLowerCase() !== w.english.toLowerCase() && !learnEnglish.has(e.toLowerCase()))
           .sort(() => Math.random() - 0.5)
           .slice(0, 3)
         const options = [...distractors, w.english].sort(() => Math.random() - 0.5)
-        return { type: 'sentence', word: w, options }
+        return { type: 'sentence', word: w, options, sentence: data.sentence, translation: data.translation }
       })
 
-    // If some words have no sentence, fill with MC-style repeats
+    // Cümle üretemediğimiz kelimeler için MC fallback
     const sentenceFiller: Exercise[] = newWords
-      .filter(w => !w.example_sentence)
+      .filter((_, i) => !sentenceResults[i])
       .map(w => {
         const distractors = pool
           .map(p => p.turkish)
@@ -211,7 +228,14 @@ export default function LearnPage() {
         <MultipleChoiceCard key={`mc-${ex.word.id}`} word={ex.word} options={ex.options} onResult={handleResult} />
       )}
       {ex.type === 'sentence' && (
-        <SentenceCard key={`s-${ex.word.id}`} word={ex.word} options={ex.options} onResult={handleResult} />
+        <SentenceCard
+          key={`s-${ex.word.id}`}
+          word={ex.word}
+          options={ex.options}
+          sentence={ex.sentence}
+          translation={ex.translation}
+          onResult={handleResult}
+        />
       )}
     </div>
   )

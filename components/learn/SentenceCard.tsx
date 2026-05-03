@@ -1,33 +1,67 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, XCircle } from 'lucide-react'
+import { CheckCircle2, XCircle, Volume2 } from 'lucide-react'
 import type { Word } from '@/lib/types'
 
 interface SentenceCardProps {
   word: Word
   options: string[]  // English word options (correct + distractors)
+  sentence: string
+  translation: string
   onResult: (correct: boolean) => void
 }
 
 function blankSentence(sentence: string, word: string): string {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(escaped, 'i')
+  // word boundary ile sadece tam kelimeyi yakala (substring değil)
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i')
   return sentence.replace(regex, '＿＿＿＿')
 }
 
-export function SentenceCard({ word, options, onResult }: SentenceCardProps) {
+export function SentenceCard({ word, options, sentence, translation, onResult }: SentenceCardProps) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [speaking, setSpeaking] = useState(false)
 
-  const hasSentence = !!word.example_sentence
-  const blanked = hasSentence ? blankSentence(word.example_sentence!, word.english) : null
-  // sentenceChanged: word was found and replaced in the sentence
-  const sentenceChanged = hasSentence && blanked !== null && blanked !== word.example_sentence
+  const blanked = blankSentence(sentence, word.english)
+  const sentenceChanged = blanked !== sentence
 
   function handleSelect(option: string) {
     if (selected) return
     setSelected(option)
     setTimeout(() => onResult(option.toLowerCase() === word.english.toLowerCase()), 1000)
+  }
+
+  async function handleSpeak() {
+    if (speaking) return
+    setSpeaking(true)
+    // Cevap verildiyse boşluksuz cümleyi seslendir, verilmediyse boşluğun yerine "blank" koy
+    const textToSpeak = selected
+      ? sentence
+      : blanked.replace('＿＿＿＿', 'blank')
+
+    try {
+      const res = await fetch(`/api/tts?text=${encodeURIComponent(textToSpeak)}`)
+      if (!res.ok) throw new Error()
+      const buffer = await res.arrayBuffer()
+      const ctx = new AudioContext()
+      const decoded = await ctx.decodeAudioData(buffer)
+      const source = ctx.createBufferSource()
+      source.buffer = decoded
+      source.connect(ctx.destination)
+      source.onended = () => setSpeaking(false)
+      source.start()
+    } catch {
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(textToSpeak)
+        u.lang = 'en-US'
+        u.rate = 0.85
+        u.onend = () => setSpeaking(false)
+        window.speechSynthesis.speak(u)
+      } else {
+        setSpeaking(false)
+      }
+    }
   }
 
   return (
@@ -38,9 +72,9 @@ export function SentenceCard({ word, options, onResult }: SentenceCardProps) {
           Boşluğu Doldur
         </p>
 
-        {hasSentence && sentenceChanged ? (
+        {sentenceChanged ? (
           <p className="text-xl font-semibold text-slate-800 text-center leading-relaxed">
-            {blanked!.split('＿＿＿＿').map((part, i, arr) => (
+            {blanked.split('＿＿＿＿').map((part, i, arr) => (
               <span key={i}>
                 {part}
                 {i < arr.length - 1 && (
@@ -52,17 +86,33 @@ export function SentenceCard({ word, options, onResult }: SentenceCardProps) {
             ))}
           </p>
         ) : (
+          // Fallback: hedef kelime cümlede bulunamadıysa düz Türkçe→İngilizce sor
           <div className="text-center">
             <p className="text-slate-500 text-sm mb-2">"{word.turkish}" kelimesinin İngilizcesi nedir?</p>
             <p className="text-4xl font-black text-slate-900">{word.turkish}</p>
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-center gap-2">
-          <span className="text-xs text-slate-400">Türkçesi:</span>
-          <span className="text-xs font-semibold text-slate-600">{word.turkish}</span>
+        {/* Türkçe çeviri her zaman görünür — yeni öğrenmede yardımcı */}
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 text-center">
+            Türkçe
+          </p>
+          <p className="text-sm text-slate-600 text-center italic leading-relaxed">
+            {translation}
+          </p>
         </div>
       </div>
+
+      {/* Listen */}
+      <button
+        onClick={handleSpeak}
+        disabled={speaking}
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-white border border-slate-150 text-slate-500 text-sm font-semibold hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm disabled:opacity-60"
+      >
+        <Volume2 size={16} className={speaking ? 'animate-pulse' : ''} />
+        {speaking ? 'Çalıyor...' : 'Cümleyi Dinle'}
+      </button>
 
       {/* Options */}
       <div className="grid grid-cols-2 gap-2.5">

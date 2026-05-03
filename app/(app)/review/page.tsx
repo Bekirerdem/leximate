@@ -14,7 +14,7 @@ import { Clock, BookOpen } from 'lucide-react'
 
 type ReviewExercise =
   | { type: 'flip'; userWord: UserWord }
-  | { type: 'sentence'; word: Word; options: string[] }
+  | { type: 'sentence'; word: Word; options: string[]; sentence: string; translation: string }
 
 export default function ReviewPage() {
   const [exercises, setExercises] = useState<ReviewExercise[]>([])
@@ -66,17 +66,35 @@ export default function ReviewPage() {
 
     const flipExercises: ReviewExercise[] = cards.map(uw => ({ type: 'flip', userWord: uw }))
 
-    const sentenceExercises: ReviewExercise[] = cards
-      .filter(uw => !!uw.word?.example_sentence)
-      .map(uw => {
-        const word = uw.word!
+    const wordsWithIds = cards.filter(uw => !!uw.word).map(uw => uw.word!)
+
+    const sentenceResults = await Promise.all(
+      wordsWithIds.map(async w => {
+        try {
+          const res = await fetch('/api/sentence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wordId: w.id }),
+          })
+          if (!res.ok) return null
+          return (await res.json()) as { sentence: string; translation: string }
+        } catch {
+          return null
+        }
+      })
+    )
+
+    const sentenceExercises: ReviewExercise[] = wordsWithIds
+      .map((word, i) => ({ word, data: sentenceResults[i] }))
+      .filter((x): x is { word: Word; data: { sentence: string; translation: string } } => !!x.data)
+      .map(({ word, data }) => {
         const distractors = pool
           .map(p => p.english)
           .filter(e => e.toLowerCase() !== word.english.toLowerCase() && !reviewEnglish.has(e.toLowerCase()))
           .sort(() => Math.random() - 0.5)
           .slice(0, 3)
         const options = [...distractors, word.english].sort(() => Math.random() - 0.5)
-        return { type: 'sentence', word, options } as ReviewExercise
+        return { type: 'sentence', word, options, sentence: data.sentence, translation: data.translation }
       })
 
     setFlipCount(flipExercises.length)
@@ -196,6 +214,8 @@ export default function ReviewPage() {
           key={`s-${ex.word.id}`}
           word={ex.word}
           options={ex.options}
+          sentence={ex.sentence}
+          translation={ex.translation}
           onResult={handleSentenceResult}
         />
       )}
