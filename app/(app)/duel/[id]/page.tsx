@@ -1,328 +1,280 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Swords, Clock } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import type { Word } from '@/lib/types'
+import { Lobby, type LobbyParticipant } from '@/components/duel/Lobby'
+import { Leaderboard, type LeaderboardEntry } from '@/components/duel/Leaderboard'
+import { DuelRoundCard } from '@/components/duel/DuelRoundCard'
 
 interface Room {
   id: string
-  challenger_id: string
-  opponent_id: string
-  status: string
-  challenger_score: number
-  opponent_score: number
-  current_word_id: number
+  host_id: string
+  status: 'waiting' | 'active' | 'completed'
   rounds_total: number
+  current_round: number
+  cefr_level: string
 }
 
-interface Answer {
+interface Participant {
+  id: number
   user_id: string
+  username: string
+  score: number
+  joined: boolean
+}
+
+interface Round {
+  round_no: number
+  word_id: number
+  english: string
+  sentence: string
+  translation: string
+  options: string[]
+}
+
+interface AnswerRow {
+  user_id: string
+  round_no: number
+  answer: string
   correct: boolean
 }
+
+const COUNTDOWN = 15
 
 export default function DuelRoomPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const [room, setRoom] = useState<Room | null>(null)
-  const [word, setWord] = useState<Word | null>(null)
-  const [options, setOptions] = useState<string[]>([])
+
   const [myId, setMyId] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [myAnswered, setMyAnswered] = useState(false)
-  const [opponentAnswered, setOpponentAnswered] = useState(false)
-  const [roundAnswers, setRoundAnswers] = useState<Answer[]>([])
-  const [roundResult, setRoundResult] = useState<'win' | 'lose' | 'draw' | null>(null)
+  const [room, setRoom] = useState<Room | null>(null)
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [rounds, setRounds] = useState<Round[]>([])
+  const [answers, setAnswers] = useState<AnswerRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [waitingForOpponent, setWaitingForOpponent] = useState(false)
-  const [countdown, setCountdown] = useState(15)
+  const [starting, setStarting] = useState(false)
+  const [selected, setSelected] = useState<string | null>(null)
 
-  const loadWordAndOptions = useCallback(async (wordId: number) => {
-    const supabase = createClient()
-    const { data: w } = await supabase.from('words').select('*').eq('id', wordId).single()
-    if (!w) return
-    setWord(w as Word)
-    setSelected(null)
-    setMyAnswered(false)
-    setOpponentAnswered(false)
-    setRoundResult(null)
-    setRoundAnswers([])
-    setCountdown(15)
+  const currentRound = useMemo(
+    () => rounds.find(r => r.round_no === room?.current_round) ?? null,
+    [rounds, room?.current_round]
+  )
 
-    const { data: pool } = await supabase
-      .from('words').select('turkish').eq('cefr_level', w.cefr_level).limit(50)
-    const distractors = (pool ?? [])
-      .map(p => p.turkish)
-      .filter(t => t !== w.turkish)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 3)
-    setOptions([...distractors, w.turkish].sort(() => Math.random() - 0.5))
-  }, [])
+  const myAnswerForRound = useMemo(
+    () => answers.find(a => a.user_id === myId && a.round_no === room?.current_round) ?? null,
+    [answers, myId, room?.current_round]
+  )
 
+  const joinedParticipants = useMemo(() => participants.filter(p => p.joined), [participants])
+
+  const answersThisRound = useMemo(
+    () => answers.filter(a => a.round_no === room?.current_round),
+    [answers, room?.current_round]
+  )
+
+  // İlk yükleme + auto-join
   useEffect(() => {
+    let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null
+
     const init = async () => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) { router.push('/login'); return }
       setMyId(user.id)
 
-      const { data: r } = await supabase
-        .from('duel_rooms').select('*').eq('id', id).single()
-      if (!r) { router.push('/duel'); return }
-
+      // Room
+      const { data: r } = await supabase.from('duel_rooms').select('*').eq('id', id).single()
+      if (!r) { toast.error('Düello bulunamadı'); router.push('/duel'); return }
       setRoom(r as Room)
-      if (r.current_word_id) await loadWordAndOptions(r.current_word_id)
 
-      if (r.status === 'waiting' && r.opponent_id === user.id) {
-        await supabase.from('duel_rooms').update({ status: 'active' }).eq('id', id)
-        setRoom(prev => prev ? { ...prev, status: 'active' } : prev)
+      // Henüz joined değilsem otomatik join (davet linkini açtım demek)
+      const { data: myPart } = await supabase
+        .from('duel_participants').select('joined').eq('room_id', id).eq('user_id', user.id).maybeSingle()
+      if (myPart && !myPart.joined && r.status === 'waiting') {
+        await fetch(`/api/duel/${id}/join`, { method: 'POST' })
       }
 
+      await Promise.all([loadParticipants(), loadRounds(), loadAnswers()])
       setLoading(false)
 
-      // Realtime subscription
-      const channel = supabase
+      // Realtime
+      channel = supabase
         .channel(`duel_${id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'duel_rooms', filter: `id=eq.${id}` }, payload => {
-          const updated = payload.new as Room
-          setRoom(updated)
-          if (updated.current_word_id !== r.current_word_id) {
-            loadWordAndOptions(updated.current_word_id)
-          }
-          if (updated.status === 'completed') {
-            setLoading(false)
-          }
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'duel_answers', filter: `room_id=eq.${id}` }, payload => {
-          const answer = payload.new as Answer & { word_id: number }
-          setRoundAnswers(prev => {
-            const next = [...prev, answer]
-            if (answer.user_id !== user.id) setOpponentAnswered(true)
-            return next
-          })
-        })
+        .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'duel_rooms', filter: `id=eq.${id}` },
+          payload => { setRoom(payload.new as Room); setSelected(null) }
+        )
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'duel_participants', filter: `room_id=eq.${id}` },
+          () => { loadParticipants() }
+        )
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'duel_answers', filter: `room_id=eq.${id}` },
+          payload => { setAnswers(prev => [...prev, payload.new as AnswerRow]) }
+        )
         .subscribe()
-
-      return () => { supabase.removeChannel(channel) }
     }
     init()
-  }, [id, router, loadWordAndOptions])
+    return () => { if (channel) channel.unsubscribe() }
+  }, [id, router])
 
-  // Countdown timer
-  useEffect(() => {
-    if (!word || myAnswered || room?.status !== 'active') return
-    if (countdown <= 0) { handleAnswer(null); return }
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [countdown, myAnswered, word, room?.status])
+  // Round değişince selected sıfırlansın
+  useEffect(() => { setSelected(null) }, [room?.current_round])
 
-  // Check if both answered — only challenger advances the round to avoid race condition
-  useEffect(() => {
-    if (!myId || !room) return
-    const myAnswer = roundAnswers.find(a => a.user_id === myId)
-    const opAnswer = roundAnswers.find(a => a.user_id !== myId)
-
-    if (myAnswer && opAnswer) {
-      if (myAnswer.correct && !opAnswer.correct) setRoundResult('win')
-      else if (!myAnswer.correct && opAnswer.correct) setRoundResult('lose')
-      else setRoundResult('draw')
-
-      // Only challenger writes to DB to prevent race condition
-      if (myId === room.challenger_id) {
-        setTimeout(() => advanceRound(myAnswer.correct, opAnswer.correct), 2000)
-      }
-    }
-  }, [roundAnswers, myId, room])
-
-  async function handleAnswer(answer: string | null) {
-    if (myAnswered || !word || !myId || !room) return
-    setMyAnswered(true)
-    setSelected(answer)
-    const correct = answer === word.turkish
-    setWaitingForOpponent(true)
-
+  const loadParticipants = useCallback(async () => {
     const supabase = createClient()
-    await supabase.from('duel_answers').insert({
-      room_id: id,
-      user_id: myId,
-      word_id: word.id,
-      answer: answer ?? '',
-      correct,
+    const { data } = await supabase
+      .from('duel_participants')
+      .select('id, user_id, score, joined, profiles!inner(username)')
+      .eq('room_id', id)
+      .order('id')
+    if (!data) return
+    setParticipants(
+      data.map(p => {
+        const profileField = (p as unknown as { profiles: { username: string } | { username: string }[] }).profiles
+        const profile = Array.isArray(profileField) ? profileField[0] : profileField
+        return {
+          id: p.id,
+          user_id: p.user_id,
+          score: p.score,
+          joined: p.joined,
+          username: profile?.username ?? '?',
+        }
+      })
+    )
+  }, [id])
+
+  const loadRounds = useCallback(async () => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('duel_rounds')
+      .select('round_no, word_id, sentence, translation, options, words!inner(english)')
+      .eq('room_id', id)
+      .order('round_no')
+    if (!data) return
+    setRounds(
+      data.map(r => {
+        const wordsField = (r as unknown as { words: { english: string } | { english: string }[] }).words
+        const word = Array.isArray(wordsField) ? wordsField[0] : wordsField
+        return {
+          round_no: r.round_no,
+          word_id: r.word_id,
+          english: word?.english ?? '',
+          sentence: r.sentence,
+          translation: r.translation,
+          options: r.options,
+        }
+      })
+    )
+  }, [id])
+
+  const loadAnswers = useCallback(async () => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('duel_answers')
+      .select('user_id, round_no, answer, correct')
+      .eq('room_id', id)
+    setAnswers((data as AnswerRow[]) ?? [])
+  }, [id])
+
+  async function handleStart() {
+    if (!room) return
+    setStarting(true)
+    const res = await fetch(`/api/duel/${id}/start`, { method: 'POST' })
+    setStarting(false)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      toast.error(err.error ?? 'Başlatılamadı')
+    }
+  }
+
+  const handleAnswer = useCallback(async (option: string | null) => {
+    if (!room || myAnswerForRound) return
+    setSelected(option)
+    await fetch(`/api/duel/${id}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roundNo: room.current_round, answer: option }),
     })
-  }
-
-  async function advanceRound(myCorrect: boolean, opCorrect: boolean) {
-    setWaitingForOpponent(false)
-    const supabase = createClient()
-
-    // challenger calls this, so myCorrect = challenger's correct
-    const newChallengerScore = room!.challenger_score + (myCorrect ? 1 : 0)
-    const newOpponentScore = room!.opponent_score + (opCorrect ? 1 : 0)
-
-    const remaining = (room!.rounds_total ?? 7) - 1
-    const isLastRound = remaining <= 0
-
-    // Sıradaki kelimeyi mevcut kelimenin seviyesinden seç (düello tek seviyede kalsın)
-    let nextWordId = room!.current_word_id
-    if (!isLastRound) {
-      const { data: currentWord } = await supabase
-        .from('words').select('cefr_level').eq('id', room!.current_word_id).single()
-      const level = currentWord?.cefr_level ?? 'A1'
-      const { data: words } = await supabase
-        .from('words').select('id').eq('cefr_level', level).limit(200)
-      const nw = words?.[Math.floor(Math.random() * (words?.length ?? 1))]
-      if (nw) nextWordId = nw.id
-    }
-
-    await supabase.from('duel_rooms').update({
-      challenger_score: newChallengerScore,
-      opponent_score: newOpponentScore,
-      current_word_id: nextWordId,
-      rounds_total: remaining,
-      status: isLastRound ? 'completed' : 'active',
-    }).eq('id', id)
-
-    if (isLastRound) {
-      const iWon = newChallengerScore > newOpponentScore
-      const isDraw = newChallengerScore === newOpponentScore
-      toast(isDraw ? '🤝 Beraberlik!' : iWon ? '🏆 Kazandın!' : '😔 Kaybettin!')
-    }
-  }
+  }, [id, room, myAnswerForRound])
 
   if (loading) return <div className="text-center text-slate-500 py-20">Yükleniyor...</div>
-
   if (!room) return null
 
-  const amChallenger = myId === room.challenger_id
-  const myScore = amChallenger ? room.challenger_score : room.opponent_score
-  const opScore = amChallenger ? room.opponent_score : room.challenger_score
-
+  // === LOBBY ===
   if (room.status === 'waiting') {
+    const lobbyData: LobbyParticipant[] = participants.map(p => ({
+      user_id: p.user_id,
+      username: p.username,
+      joined: p.joined,
+      is_host: p.user_id === room.host_id,
+      is_me: p.user_id === myId,
+    }))
     return (
-      <div className="text-center py-20 space-y-4">
-        <div className="text-4xl animate-pulse">⚔️</div>
-        <h2 className="text-xl font-bold text-slate-800">Rakip bekleniyor...</h2>
-        <p className="text-slate-500 text-sm">Rakibin düelloyu kabul etmesi bekleniyor</p>
-      </div>
+      <Lobby
+        participants={lobbyData}
+        rounds={room.rounds_total}
+        level={room.cefr_level}
+        amHost={myId === room.host_id}
+        starting={starting}
+        onStart={handleStart}
+      />
     )
   }
 
+  // === COMPLETED ===
   if (room.status === 'completed') {
-    const iWon = myScore > opScore
-    const isDraw = myScore === opScore
-    return (
-      <div className="text-center py-12 space-y-6">
-        <div className="text-6xl">{isDraw ? '🤝' : iWon ? '🏆' : '😔'}</div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">
-            {isDraw ? 'Beraberlik!' : iWon ? 'Kazandın!' : 'Kaybettin!'}
-          </h2>
-          <p className="text-slate-500 mt-1">Düello tamamlandı</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-100 p-5">
-          <div className="flex justify-around">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-blue-600">{myScore}</p>
-              <p className="text-xs text-slate-500 mt-1">Sen</p>
-            </div>
-            <div className="text-slate-300 font-bold text-2xl self-center">—</div>
-            <div className="text-center">
-              <p className="text-3xl font-bold text-slate-600">{opScore}</p>
-              <p className="text-xs text-slate-500 mt-1">Rakip</p>
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={() => router.push('/duel')}
-          className="w-full py-3.5 bg-blue-600 text-white rounded-2xl font-semibold"
-        >
-          Düello Sayfasına Dön
-        </button>
-      </div>
-    )
+    const entries: LeaderboardEntry[] = participants.map(p => ({
+      user_id: p.user_id,
+      username: p.username,
+      score: p.score,
+      is_me: p.user_id === myId,
+    }))
+    return <Leaderboard entries={entries} roundsTotal={room.rounds_total} />
+  }
+
+  // === ACTIVE ===
+  if (!currentRound) {
+    return <div className="text-center text-slate-500 py-20">Tur yükleniyor...</div>
   }
 
   return (
-    <div className="space-y-5">
-      {/* Scoreboard */}
+    <div className="space-y-4">
+      {/* Mini scoreboard + tur indikatörü */}
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-white">{myScore}</p>
-            <p className="text-xs text-slate-400">Sen</p>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <Swords size={16} className="text-slate-400" />
-            <p className="text-xs text-slate-500">{room.rounds_total} tur kaldı</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-white">{opScore}</p>
-            <p className="text-xs text-slate-400">Rakip</p>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-slate-400 font-semibold">
+            Tur {room.current_round}/{room.rounds_total}
+          </p>
+          <p className="text-xs text-slate-400">{room.cefr_level}</p>
+        </div>
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${joinedParticipants.length}, 1fr)` }}>
+          {joinedParticipants.map(p => {
+            const isMe = p.user_id === myId
+            return (
+              <div key={p.user_id} className={`text-center rounded-xl py-2 ${isMe ? 'bg-white/10' : ''}`}>
+                <p className="text-xl font-bold text-white">{p.score}</p>
+                <p className="text-[10px] text-slate-400 truncate">{isMe ? 'Sen' : p.username}</p>
+              </div>
+            )
+          })}
         </div>
       </div>
 
-      {/* Round result */}
-      {roundResult && (
-        <div className={`rounded-2xl p-4 text-center font-bold text-lg ${
-          roundResult === 'win' ? 'bg-emerald-100 text-emerald-700' :
-          roundResult === 'lose' ? 'bg-red-100 text-red-700' :
-          'bg-amber-100 text-amber-700'
-        }`}>
-          {roundResult === 'win' ? '✓ Bu turu kazandın!' : roundResult === 'lose' ? '✗ Bu turu kaybettin' : '~ Beraberlik'}
-        </div>
-      )}
-
-      {/* Question */}
-      {word && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-indigo-400">Türkçesi nedir?</p>
-              <div className={`flex items-center gap-1 text-xs font-bold ${countdown <= 5 ? 'text-red-500' : 'text-slate-400'}`}>
-                <Clock size={12} />
-                {countdown}s
-              </div>
-            </div>
-            <p className="text-4xl font-bold text-slate-900">{word.english}</p>
-          </div>
-
-          {!myAnswered ? (
-            <div className="grid grid-cols-2 gap-3">
-              {options.map(opt => (
-                <button
-                  key={opt}
-                  onClick={() => handleAnswer(opt)}
-                  className="py-4 px-3 rounded-xl font-medium text-sm border-2 border-slate-100 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 active:scale-95 transition-all"
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                {options.map(opt => {
-                  const isCorrect = opt === word.turkish
-                  const isSelected = selected === opt
-                  let cls = 'py-4 px-3 rounded-xl font-medium text-sm border-2 '
-                  if (isCorrect) cls += 'border-emerald-400 bg-emerald-50 text-emerald-700'
-                  else if (isSelected) cls += 'border-red-400 bg-red-50 text-red-700'
-                  else cls += 'border-slate-100 bg-white text-slate-300'
-                  return <div key={opt} className={cls}>{opt}</div>
-                })}
-              </div>
-              {waitingForOpponent && !opponentAnswered && (
-                <div className="text-center text-slate-400 text-sm py-2 animate-pulse">
-                  Rakip yanıtlıyor...
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <DuelRoundCard
+        key={room.current_round}
+        sentence={currentRound.sentence}
+        translation={currentRound.translation}
+        options={currentRound.options}
+        correctAnswer={currentRound.english}
+        countdownSeconds={COUNTDOWN}
+        myAnswered={!!myAnswerForRound}
+        selected={selected ?? myAnswerForRound?.answer ?? null}
+        participantsAnswered={answersThisRound.length}
+        participantsTotal={joinedParticipants.length}
+        onAnswer={handleAnswer}
+      />
     </div>
   )
 }
