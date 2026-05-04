@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { generateContextualSentence } from '@/lib/gemini'
+import { generateContextualSentence, type ContextSentence } from '@/lib/gemini'
 import { NextResponse } from 'next/server'
 
 const LEVEL_ORDER = ['A0','A1','A2','B1','B2','C1','C2']
@@ -7,6 +7,21 @@ const MAX_PARTICIPANTS = 3   // host + 3 davetli = 4 kişi
 const DEFAULT_ROUNDS = 7
 const MIN_ROUNDS = 3
 const MAX_ROUNDS = 15
+const SENTENCE_TIMEOUT_MS = 5000
+
+function fallbackSentence(english: string, turkish: string): ContextSentence {
+  return {
+    sentence: `Use the word "${english}" in a sentence.`,
+    translation: `"${turkish}" kelimesini cümle içinde kullan.`,
+  }
+}
+
+function withTimeout(p: Promise<ContextSentence>, fallback: ContextSentence): Promise<ContextSentence> {
+  return Promise.race([
+    p.catch(() => fallback),
+    new Promise<ContextSentence>(resolve => setTimeout(() => resolve(fallback), SENTENCE_TIMEOUT_MS)),
+  ])
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -45,12 +60,16 @@ export async function POST(request: Request) {
   const shuffled = [...levelWords].sort(() => Math.random() - 0.5)
   const targets = shuffled.slice(0, roundsTotal)
 
-  // Her kelime için Gemini cümle prefetch (paralel)
+  // Her kelime için Gemini cümle prefetch — 5sn timeout, geç gelene fallback.
+  // Böylece oda yaratımı toplam <=5sn'de biter, kullanıcı sonsuz beklemez.
   const sentences = await Promise.all(
     targets.map(w =>
-      generateContextualSentence(
-        { english: w.english, turkish: w.turkish, part_of_speech: w.part_of_speech },
-        allEnglish
+      withTimeout(
+        generateContextualSentence(
+          { english: w.english, turkish: w.turkish, part_of_speech: w.part_of_speech },
+          allEnglish
+        ),
+        fallbackSentence(w.english, w.turkish)
       )
     )
   )
