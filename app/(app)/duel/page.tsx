@@ -196,11 +196,15 @@ export default function DuelHubPage() {
     setSearchResult(null)
     setSearchError('')
     const supabase = createClient()
-    const { data } = await supabase
-      .from('profiles').select('id, username, cefr_level, streak_count')
-      .ilike('username', username.trim()).neq('id', myId ?? '').limit(1).single()
-    if (data) setSearchResult(data as Friend)
-    else setSearchError('Kullanıcı bulunamadı')
+    // RLS profiles tablosunda yabancı kullanıcı okumayı bloklar; bu RPC
+    // security definer ile sadece username eşleşmesini publish eder.
+    const { data, error } = await supabase
+      .rpc('search_profile_by_username', { query: username.trim() })
+    if (error || !data || data.length === 0) {
+      setSearchError('Kullanıcı bulunamadı')
+    } else {
+      setSearchResult(data[0] as Friend)
+    }
     setSearching(false)
   }
 
