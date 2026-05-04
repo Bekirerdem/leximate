@@ -26,8 +26,22 @@ export default function LearnPage() {
   const [loading, setLoading] = useState(true)
   const [score, setScore] = useState({ correct: 0, total: 0 })
   const [leveledUp, setLeveledUp] = useState(false)
+  const [sentencesPending, setSentencesPending] = useState(true)
+  const [waitingForSentences, setWaitingForSentences] = useState(false)
 
   useEffect(() => { loadSession() }, [])
+
+  // Cümleler arka planda yüklenip eklendiğinde, eğer kullanıcı son egzersizi bitirip
+  // beklemeye düştüyse, otomatik devam ettir.
+  useEffect(() => {
+    if (!waitingForSentences || sentencesPending) return
+    setWaitingForSentences(false)
+    setCurrentIndex(i => {
+      if (i + 1 < exercises.length) return i + 1
+      setCompleted(true)
+      return i
+    })
+  }, [sentencesPending, waitingForSentences, exercises.length])
 
   async function loadSession() {
     const supabase = createClient()
@@ -48,11 +62,12 @@ export default function LearnPage() {
 
     if (!newWords || newWords.length === 0) {
       setExercises([])
+      setSentencesPending(false)
       setLoading(false)
       return
     }
 
-    // Distractor pool (Turkish for MC, English for sentence)
+    // Distractor pool (Türkçe MC için, English sentence için)
     const { data: poolWords } = await supabase
       .from('words').select('english, turkish').eq('cefr_level', level).limit(150)
 
@@ -60,10 +75,10 @@ export default function LearnPage() {
     const learnTurkish = new Set(newWords.map(w => w.turkish))
     const learnEnglish = new Set(newWords.map(w => w.english.toLowerCase()))
 
-    // Phase 1: Flip cards (learn)
+    // Faz 1: Flip kartları (öğren)
     const flipExercises: Exercise[] = newWords.map(w => ({ type: 'flip', word: w }))
 
-    // Phase 2: Multiple choice — show English, pick Turkish
+    // Faz 2: Çoktan seçmeli — İngilizce göster, Türkçe seçtir
     const mcExercises: Exercise[] = newWords.map(w => {
       const distractors = pool
         .map(p => p.turkish)
@@ -74,7 +89,21 @@ export default function LearnPage() {
       return { type: 'mc', word: w, options }
     })
 
-    // Phase 3: Sentence completion — Gemini'den context-aware cümle çek (paralel)
+    // Önce flip+MC'yi anında render et — Gemini'yi beklemeden
+    setExercises([...flipExercises, ...mcExercises])
+    setLoading(false)
+
+    // Faz 3: Cümle tamamlama — Gemini cümleleri arka planda gelsin
+    void loadSentenceExercises(newWords, pool, learnEnglish)
+  }
+
+  async function loadSentenceExercises(
+    newWords: Word[],
+    pool: { english: string; turkish: string }[],
+    learnEnglish: Set<string>
+  ) {
+    const learnTurkish = new Set(newWords.map(w => w.turkish))
+
     const sentenceResults = await Promise.all(
       newWords.map(async w => {
         try {
@@ -117,8 +146,8 @@ export default function LearnPage() {
         return { type: 'mc', word: w, options }
       })
 
-    setExercises([...flipExercises, ...mcExercises, ...sentenceExercises, ...sentenceFiller])
-    setLoading(false)
+    setExercises(prev => [...prev, ...sentenceExercises, ...sentenceFiller])
+    setSentencesPending(false)
   }
 
   async function handleResult(correct: boolean) {
@@ -137,7 +166,11 @@ export default function LearnPage() {
     }
 
     if (currentIndex + 1 >= exercises.length) {
-      setCompleted(true)
+      if (sentencesPending) {
+        setWaitingForSentences(true)
+      } else {
+        setCompleted(true)
+      }
     } else {
       setCurrentIndex(i => i + 1)
     }
@@ -151,6 +184,16 @@ export default function LearnPage() {
         <p className="text-5xl">🎉</p>
         <p className="text-slate-700 font-bold text-lg">Bu seviyede yeni kelime kalmadı!</p>
         <Link href="/review" className={cn(buttonVariants({ variant: 'outline' }))}>Tekrar Yapmaya Git</Link>
+      </div>
+    )
+  }
+
+  if (waitingForSentences) {
+    return (
+      <div className="text-center space-y-4 py-20">
+        <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-200 border-t-indigo-600" />
+        <p className="text-slate-600 font-semibold">Cümleler hazırlanıyor...</p>
+        <p className="text-slate-400 text-sm">Son aşamaya geçiyoruz</p>
       </div>
     )
   }
