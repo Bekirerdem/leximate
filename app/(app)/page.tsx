@@ -16,12 +16,10 @@ export default async function DashboardPage() {
   const [
     { data: session },
     { count: totalWords },
-    { count: dueToday },
     { count: masteredWords },
   ] = await Promise.all([
     supabase.from('daily_sessions').select('*').eq('user_id', user.id).eq('session_date', today).single(),
     supabase.from('user_words').select('*', { count: 'exact', head: true }).eq('user_id', user.id).neq('status', 'new'),
-    supabase.from('user_words').select('*', { count: 'exact', head: true }).eq('user_id', user.id).lte('next_review_date', today).neq('status', 'new'),
     supabase.from('user_words').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'mastered'),
   ])
 
@@ -155,8 +153,8 @@ export default async function DashboardPage() {
             <RotateCcw size={18} className="text-amber-600" />
           </div>
           <p className="font-bold text-slate-800 text-sm">Tekrar Et</p>
-          <p className={`text-xs mt-0.5 font-medium ${(dueToday ?? 0) > 0 ? 'text-amber-500' : 'text-slate-400'}`}>
-            {(dueToday ?? 0) > 0 ? `${dueToday} kart bekliyor` : 'Hepsi güncel'}
+          <p className={`text-xs mt-0.5 font-medium ${(totalWords ?? 0) > 0 ? 'text-amber-500' : 'text-slate-400'}`}>
+            {(totalWords ?? 0) > 0 ? `${totalWords} kelime hazır` : 'Henüz kelime yok'}
           </p>
         </Link>
       </div>

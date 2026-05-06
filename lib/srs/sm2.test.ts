@@ -2,14 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { calculateNextReview } from './sm2'
 
 describe('SM-2 algorithm', () => {
-  it('ilk doğru cevap — interval 1 gün, ease_factor değişmez', () => {
+  it('ilk doğru cevap — interval 0 (aynı gün tekrar edilebilir), ease_factor değişmez', () => {
     const result = calculateNextReview({
       ease_factor: 2.5,
       interval_days: 1,
       correct_count: 0,
       quality: 4,
     })
-    expect(result.interval_days).toBe(1)
+    expect(result.interval_days).toBe(0)
     expect(result.ease_factor).toBeCloseTo(2.5)
   })
 
