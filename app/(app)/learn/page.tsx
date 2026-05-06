@@ -52,15 +52,29 @@ export default function LearnPage() {
       .from('profiles').select('cefr_level').eq('id', user.id).single()
     const level = profile?.cefr_level ?? 'A1'
 
-    const { data: seenWordIds } = await supabase
-      .from('user_words').select('word_id').eq('user_id', user.id)
-    const excludeIds = seenWordIds?.map(r => r.word_id) ?? []
+    // Kullanıcının daha önce gördüğü kelimeler — hem id hem english bazlı exclude.
+    // English bazlı: seviyeler arası tekrarı (örn. A1'de "house" öğrendi, A2'de aynı kelime gelmesin) önler.
+    const { data: seen } = await supabase
+      .from('user_words')
+      .select('word_id, words!inner(english)')
+      .eq('user_id', user.id)
 
-    let query = supabase.from('words').select('*').eq('cefr_level', level).limit(DAILY_WORD_COUNT)
+    const seenRows = (seen ?? []) as { word_id: number; words: { english: string } | { english: string }[] }[]
+    const excludeIds = seenRows.map(r => r.word_id)
+    const seenEnglish = new Set(
+      seenRows.flatMap(r => Array.isArray(r.words) ? r.words.map(x => x.english.toLowerCase()) : [r.words.english.toLowerCase()])
+    )
+
+    // Biraz fazla aday çek, sonra defense-in-depth client-side english filter ile DAILY_WORD_COUNT'a in.
+    let query = supabase.from('words').select('*').eq('cefr_level', level).limit(DAILY_WORD_COUNT * 3)
     if (excludeIds.length > 0) query = query.not('id', 'in', `(${excludeIds.join(',')})`)
-    const { data: newWords } = await query
+    const { data: candidates } = await query
 
-    if (!newWords || newWords.length === 0) {
+    const newWords = (candidates ?? [])
+      .filter(w => !seenEnglish.has(w.english.toLowerCase()))
+      .slice(0, DAILY_WORD_COUNT)
+
+    if (newWords.length === 0) {
       setExercises([])
       setSentencesPending(false)
       setLoading(false)

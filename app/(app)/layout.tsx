@@ -29,12 +29,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const { count } = await supabase
-        .from('user_words')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
+      // Profil tamamlanmış mı (cefr_level set edilmiş mi) kontrol et.
+      // user_words sayısı kullanılmamalı: progress reset edildiğinde de tetiklenir.
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('cefr_level')
+        .eq('id', user.id)
+        .maybeSingle()
 
-      if (!count || count === 0) {
+      if (!profile?.cefr_level) {
         router.push('/onboarding')
       } else {
         localStorage.setItem('leximate_onboarded', '1')

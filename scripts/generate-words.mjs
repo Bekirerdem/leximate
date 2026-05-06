@@ -128,28 +128,34 @@ async function main() {
       console.log(`  Batch ${b + 1}/${batches} üretiliyor...`)
       const words = await generateBatch(level, b + 1, levelExisting)
 
-      const newWords = words.filter(w => {
-        const key = w.english?.toLowerCase()
-        return (
-          key &&
-          w.turkish &&
-          w.part_of_speech &&
-          w.example_sentence &&
-          !globalSet.has(key) &&
-          validPos.includes(w.part_of_speech)
-        )
-      })
+      const newWords = words
+        .map(w => (w.english ? { ...w, english: w.english.toLowerCase() } : w))
+        .filter(w => {
+          const key = w.english
+          return (
+            key &&
+            w.turkish &&
+            w.part_of_speech &&
+            w.example_sentence &&
+            !globalSet.has(key) &&
+            validPos.includes(w.part_of_speech)
+          )
+        })
 
       if (newWords.length === 0) {
         console.log('  Batch boş, atlanıyor')
         continue
       }
 
-      const { error } = await supabase.from('words').insert(newWords)
+      // Upsert: aynı (lower(english), cefr_level) varsa duplicate eklemesin.
+      // Idempotent — script tekrar çalışsa bile data corruption olmaz.
+      const { error } = await supabase
+        .from('words')
+        .upsert(newWords, { onConflict: 'english,cefr_level', ignoreDuplicates: true })
       if (error) {
-        console.error(`  Insert hatası:`, error.message)
+        console.error(`  Upsert hatası:`, error.message)
       } else {
-        console.log(`  ✓ ${newWords.length} kelime eklendi`)
+        console.log(`  ✓ ${newWords.length} kelime upsert edildi`)
         newWords.forEach(w => {
           globalSet.add(w.english.toLowerCase())
           levelExisting.add(w.english.toLowerCase())
