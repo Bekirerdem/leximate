@@ -3,14 +3,13 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect } from 'react'
-import { Home, BookOpen, RotateCcw, Swords, User } from 'lucide-react'
+import { Home, BookOpen, RotateCcw, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/', icon: Home, label: 'Ana Sayfa' },
   { href: '/learn', icon: BookOpen, label: 'Öğren' },
   { href: '/review', icon: RotateCcw, label: 'Tekrar' },
-  { href: '/duel', icon: Swords, label: 'Düello' },
   { href: '/profile', icon: User, label: 'Profil' },
 ]
 

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { BookOpen, RotateCcw, Zap } from 'lucide-react'
+import { BookOpen, RotateCcw } from 'lucide-react'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -158,19 +158,6 @@ export default async function DashboardPage() {
           </p>
         </Link>
       </div>
-
-      {/* Duel promo */}
-      <Link
-        href="/duel"
-        className="flex items-center gap-4 bg-gradient-to-r from-slate-800 to-slate-900 rounded-3xl p-5 active:scale-[0.98] transition-all"
-      >
-        <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-2xl shrink-0">⚔️</div>
-        <div className="flex-1">
-          <p className="font-bold text-white text-sm">Düello Yap</p>
-          <p className="text-slate-400 text-xs mt-0.5">Arkadaşlarınla yarış</p>
-        </div>
-        <Zap size={18} className="text-slate-400 shrink-0" />
-      </Link>
     </div>
   )
 }
