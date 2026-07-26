@@ -35,6 +35,42 @@ export interface UserWord {
   word?: Word
 }
 
+// Kalıp sistemi — sistemin yeni çekirdek birimi.
+// situation bilinçli olarak string: durum listesi ESP needs analysis'ten
+// doğuyor, sabit bir enum'a bağlamak için erken.
+export type PhraseRegister = 'casual' | 'neutral' | 'formal'
+
+export interface Phrase {
+  id: number
+  english: string
+  turkish: string
+  situation: string
+  register: PhraseRegister
+  audio_url: string | null
+}
+
+export interface UserPhrase {
+  id: number
+  user_id: string
+  phrase_id: number
+  status: WordStatus
+  ease_factor: number
+  interval_days: number
+  next_review_date: string
+  correct_count: number
+  incorrect_count: number
+  last_reviewed_at: string | null
+  phrase?: Phrase
+}
+
+export interface ListeningLog {
+  id: number
+  user_id: string
+  log_date: string
+  minutes: number
+  source: string
+}
+
 export interface DailySession {
   id: number
   user_id: string
